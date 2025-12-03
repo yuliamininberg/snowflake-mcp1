@@ -24,15 +24,25 @@ async function runQuery(sql) {
   const connection = createConnection();
 
   return new Promise((resolve, reject) => {
+    console.log("Connecting to Snowflake...");
     connection.connect(err => {
-      if (err) return reject(err);
+      if (err) {
+        console.error("❌ Snowflake connection error:", err);
+        return reject(err);
+      }
 
+      console.log("Connected. Executing SQL:", sql);
       connection.execute({
         sqlText: sql,
         complete: (err, stmt, rows) => {
           connection.destroy(() => {});
-          if (err) reject(err);
-          else resolve(rows || []);
+          if (err) {
+            console.error("❌ Snowflake query error:", err);
+            reject(err);
+          } else {
+            console.log("Query returned rows:", rows?.length || 0);
+            resolve(rows || []);
+          }
         }
       });
     });
@@ -40,16 +50,18 @@ async function runQuery(sql) {
 }
 
 //
-// 2. MCP SERVER + TOOL
+// 2. MCP SERVER + TOOL REGISTRATION
 //
+console.log("Creating MCP server...");
 const server = new McpServer({
   name: "snowflake-mcp",
   version: "1.0.0"
 });
 
-// Only allow SELECT queries
 const forbidden = /\b(UPDATE|DELETE|INSERT|MERGE|DROP|ALTER|TRUNCATE)\b/i;
 
+// 🔥 HIGH-DETAIL LOGGING FOR TOOL REGISTRATION
+console.log("Registering MCP tool: run_query...");
 server.tool(
   "run_query",
   "Execute a SQL SELECT query on Snowflake",
@@ -57,24 +69,27 @@ server.tool(
     sql: z.string()
   },
   async ({ sql }) => {
+    console.log("🔥 run_query tool invoked! SQL =", sql);
+
     if (forbidden.test(sql)) {
+      console.log("❌ Blocked non-SELECT query");
       throw new Error("Only SELECT queries are allowed.");
     }
 
     const rows = await runQuery(sql);
+
     return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(rows)
-        }
-      ]
+      content: [{
+        type: "text",
+        text: JSON.stringify(rows)
+      }]
     };
   }
 );
+console.log("✔ MCP tool registered: run_query");
 
 //
-// 3. EXPRESS SERVER + MCP ENDPOINT
+// 3. EXPRESS SERVER + MCP TRANSPORT
 //
 const app = express();
 app.use(express.json());
@@ -84,17 +99,20 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-// MCP Transport
+// Create the MCP transport (stateless mode)
+console.log("Initializing StreamableHTTPServerTransport...");
 const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: undefined // stateless
+  sessionIdGenerator: undefined
 });
 
-// MCP endpoint
+// This is the REAL /mcp endpoint
 app.post("/mcp", async (req, res) => {
+  console.log("📥 Incoming MCP request:", req.body);
+
   try {
     await transport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error("MCP request error:", error);
+    console.error("❌ Error handling MCP request:", error);
 
     if (!res.headersSent) {
       res.status(500).json({
@@ -115,8 +133,16 @@ app.post("/mcp", async (req, res) => {
 const port = process.env.PORT || 3000;
 
 (async () => {
-  await server.connect(transport);
-  app.listen(port, () => {
-    console.log(`MCP server running on port ${port}`);
-  });
+  try {
+    console.log("Connecting MCP server to transport...");
+    await server.connect(transport);
+    console.log("✔ MCP transport connected.");
+
+    app.listen(port, () => {
+      console.log(`🚀 MCP server running on port ${port}`);
+    });
+  } catch (err) {
+    console.error("❌ MCP server failed to start:", err);
+    process.exit(1);
+  }
 })();
