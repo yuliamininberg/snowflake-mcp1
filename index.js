@@ -89,56 +89,59 @@ app.post("/mcp", async (req, res) => {
   }
 
   // Handle MCP callTool
-  if (body.method === "callTool") {
-    const toolName = body.params.name;
-    const toolArgs = body.params.arguments;
+if (body.method === "callTool") {
+  const toolName = body.params.name;
+  const toolArgs = body.params.arguments;
 
-    console.log("👉 Calling tool:", toolName, "ARGS:", toolArgs);
+  console.log("👉 Calling tool:", toolName, "ARGS:", toolArgs);
 
-    try {
-      const tool = server.tools.get(toolName);
-      if (!tool) {
-        throw new Error(`Tool '${toolName}' not found`);
-      }
-      const result = await tool.invoke(toolArgs);
+  try {
+    // FIX: Your tools live in _registeredTools
+    const tool = server._registeredTools.get(toolName);
 
-
-      // SSE response format
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      });
-
-      res.write(`event: message\n`);
-      res.write(
-        `data: ${JSON.stringify({
-          jsonrpc: "2.0",
-          id: body.id,
-          result,
-        })}\n\n`
-      );
-
-      return res.end();
-    } catch (err) {
-      console.error("❌ Tool failed:", err);
-
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-      });
-
-      res.write(`event: message\n`);
-      res.write(
-        `data: ${JSON.stringify({
-          jsonrpc: "2.0",
-          id: body.id,
-          error: { code: -32000, message: err.error || "Tool failed" },
-        })}\n\n`
-      );
-
-      return res.end();
+    if (!tool) {
+      throw new Error(`Tool '${toolName}' not found`);
     }
+
+    // FIX: invoke tool handler
+    const result = await tool.impl(toolArgs);
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    res.write(`event: message\n`);
+    res.write(
+      `data: ${JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        result,
+      })}\n\n`
+    );
+
+    return res.end();
+  } catch (err) {
+    console.error("❌ Tool failed:", err);
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+    });
+
+    res.write(`event: message\n`);
+    res.write(
+      `data: ${JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        error: { code: -32000, message: err.message || "Tool failed" },
+      })}\n\n`
+    );
+
+    return res.end();
   }
+}
+
 
   // Unsupported method
   res.writeHead(200, {
