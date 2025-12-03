@@ -43,10 +43,9 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Only allow SELECT queries for safety
+// Only allow SELECT queries
 const forbidden = /\b(UPDATE|DELETE|INSERT|MERGE|DROP|ALTER|TRUNCATE)\b/i;
 
-// Tool definition
 server.tool(
   "run_query",
   "Run a SELECT SQL query on Snowflake",
@@ -76,14 +75,17 @@ async function main() {
   const app = express();
   app.use(express.json());
 
+  // Health check
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
+  // Attach MCP transport
   const transport = new StreamableHTTPServerTransport({
     app,
     endpoint: "/mcp",
   });
 
-  server.connect(transport);
+  // MOST IMPORTANT: CONNECT THE MCP SERVER
+  await server.connect(transport);
 
   const port = process.env.PORT || 3000;
   app.listen(port, () => {
@@ -91,4 +93,6 @@ async function main() {
   });
 }
 
-main();
+main().catch(err => {
+  console.error("MCP server failed to start:", err);
+});
