@@ -41,6 +41,7 @@ const server = new McpServer({
   version: "1.0.0",
 });
 console.log("DEBUG: MCP server object keys:", Object.keys(server));
+console.log("DEBUG full server object:", server);
 
 
 // Register the run_query tool
