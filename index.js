@@ -40,6 +40,8 @@ const server = new McpServer({
   name: "snowflake-mcp",
   version: "1.0.0",
 });
+console.log("DEBUG: MCP server object keys:", Object.keys(server));
+
 
 // Register the run_query tool
 server.registerTool(
