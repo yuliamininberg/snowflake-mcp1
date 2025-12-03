@@ -3,12 +3,12 @@ import express from "express";
 import snowflake from "snowflake-sdk";
 import { z } from "zod";
 
-// 👉 Correct MCP import for your SDK version
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // ------------------------------------------------------------
 // 1. Create Snowflake Connection
 // ------------------------------------------------------------
+
 function createConnection() {
   const connection = snowflake.createConnection({
     account: process.env.SNOWFLAKE_ACCOUNT,
@@ -35,6 +35,7 @@ const connection = createConnection();
 // ------------------------------------------------------------
 // 2. Create MCP Server & Register Tools
 // ------------------------------------------------------------
+
 const server = new McpServer({
   name: "snowflake-mcp",
   version: "1.0.0",
@@ -46,9 +47,7 @@ console.log(
   Object.getOwnPropertyNames(Object.getPrototypeOf(server))
 );
 
-// ------------------------------------------------------------------
-// 👉 FIX: Your SDK uses server.tool() for tool registration
-// ------------------------------------------------------------------
+// REGISTER TOOL (correct API for your SDK)
 server.tool(
   "run_query",
   z.object({
@@ -63,9 +62,7 @@ server.tool(
         complete: (err, stmt, rows) => {
           if (err) {
             console.error("❌ Snowflake query error:", err);
-            return reject({
-              error: err.message,
-            });
+            return reject(err);
           }
 
           console.log("✔ Query succeeded:", rows);
@@ -77,42 +74,28 @@ server.tool(
 );
 
 console.log("✔ MCP tool registered: run_query");
+console.log("DEBUG registered tools:", server._registeredTools);
 
 // ------------------------------------------------------------
-// 3. EXPRESS HTTP SERVER — JSON-RPC Handler for /mcp
+// 3. EXPRESS JSON-RPC HANDLER
 // ------------------------------------------------------------
+
 const app = express();
 app.use(express.json());
 
-// Handle POST /mcp
 app.post("/mcp", async (req, res) => {
+  console.log("📩 Incoming RPC:", req.body);
   const body = req.body;
 
-  console.log("📩 Incoming RPC:", body);
-
-  if (!body || !body.method) {
-    return res.status(400).json({ error: "Invalid request" });
-  }
-
-  // ------------------------------------------------------------------
-  // 🔥 callTool handler
-  // ------------------------------------------------------------------
   if (body.method === "callTool") {
     const toolName = body.params.name;
     const toolArgs = body.params.arguments;
 
-    console.log("👉 Calling tool:", toolName, "ARGS:", toolArgs);
+    console.log("👉 Calling tool:", toolName, toolArgs);
 
     try {
-      // FIX: use the server's internal registry (populated by server.tool)
-      const tool = server._registeredTools[toolName];
-
-      if (!tool) {
-        throw new Error(`Tool '${toolName}' not found`);
-      }
-
-      // Execute impl
-      const result = await tool.impl(toolArgs);
+      // FIX: use SDK's built-in execution function
+      const result = await server.executeToolHandler(toolName, toolArgs);
 
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -120,7 +103,7 @@ app.post("/mcp", async (req, res) => {
         Connection: "keep-alive",
       });
 
-      res.write(`event: message\n`);
+      res.write("event: message\n");
       res.write(
         `data: ${JSON.stringify({
           jsonrpc: "2.0",
@@ -128,29 +111,30 @@ app.post("/mcp", async (req, res) => {
           result,
         })}\n\n`
       );
-
       return res.end();
     } catch (err) {
       console.error("❌ Tool failed:", err);
 
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+      });
 
-      res.write(`event: message\n`);
+      res.write("event: message\n");
       res.write(
         `data: ${JSON.stringify({
           jsonrpc: "2.0",
           id: body.id,
-          error: { code: -32000, message: err.message },
+          error: {
+            code: -32000,
+            message: err.message || "Tool failed",
+          },
         })}\n\n`
       );
-
       return res.end();
     }
   }
 
-  // ------------------------------------------------------------------
-  // Unsupported method
-  // ------------------------------------------------------------------
+  // fallback
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
   });
@@ -167,12 +151,16 @@ app.post("/mcp", async (req, res) => {
   res.end();
 });
 
-// GET /mcp simple check
+// ------------------------------------------------------------
+// SIMPLE STATUS ENDPOINT
+// ------------------------------------------------------------
 app.get("/mcp", (req, res) => {
   res.json({ status: "MCP server running" });
 });
 
-// Start server
+// ------------------------------------------------------------
+// START SERVER
+// ------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 MCP server running on port ${PORT}`);
