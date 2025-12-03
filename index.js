@@ -95,7 +95,10 @@ app.post("/mcp", async (req, res) => {
 
     try {
       // FIX: use SDK's built-in execution function
-      const result = await server.executeToolHandler(toolName, toolArgs);
+      const result = await server.executeToolHandler({
+        name: toolName,
+        arguments: toolArgs,
+      });
 
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
