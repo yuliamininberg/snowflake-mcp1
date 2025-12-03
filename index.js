@@ -3,12 +3,12 @@ import express from "express";
 import snowflake from "snowflake-sdk";
 import { z } from "zod";
 
+// 👉 Correct MCP import for your SDK version
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // ------------------------------------------------------------
 // 1. Create Snowflake Connection
 // ------------------------------------------------------------
-
 function createConnection() {
   const connection = snowflake.createConnection({
     account: process.env.SNOWFLAKE_ACCOUNT,
@@ -35,22 +35,25 @@ const connection = createConnection();
 // ------------------------------------------------------------
 // 2. Create MCP Server & Register Tools
 // ------------------------------------------------------------
-
 const server = new McpServer({
   name: "snowflake-mcp",
   version: "1.0.0",
 });
+
 console.log("DEBUG: MCP server object keys:", Object.keys(server));
+console.log(
+  "Available server methods:",
+  Object.getOwnPropertyNames(Object.getPrototypeOf(server))
+);
 
-console.log("DEBUG _registeredTools raw:", server._registeredTools);
-
-
-// Register the run_query tool
-server.registerTool(
+// ------------------------------------------------------------------
+// 👉 FIX: Your SDK uses server.tool() for tool registration
+// ------------------------------------------------------------------
+server.tool(
   "run_query",
-  {
+  z.object({
     sql: z.string(),
-  },
+  }),
   async ({ sql }) => {
     console.log("🔍 Running SQL:", sql);
 
@@ -60,7 +63,9 @@ server.registerTool(
         complete: (err, stmt, rows) => {
           if (err) {
             console.error("❌ Snowflake query error:", err);
-            return reject({ error: err.message });
+            return reject({
+              error: err.message,
+            });
           }
 
           console.log("✔ Query succeeded:", rows);
@@ -76,7 +81,6 @@ console.log("✔ MCP tool registered: run_query");
 // ------------------------------------------------------------
 // 3. EXPRESS HTTP SERVER — JSON-RPC Handler for /mcp
 // ------------------------------------------------------------
-
 const app = express();
 app.use(express.json());
 
@@ -90,62 +94,63 @@ app.post("/mcp", async (req, res) => {
     return res.status(400).json({ error: "Invalid request" });
   }
 
-  // Handle MCP callTool
-if (body.method === "callTool") {
-  const toolName = body.params.name;
-  const toolArgs = body.params.arguments;
+  // ------------------------------------------------------------------
+  // 🔥 callTool handler
+  // ------------------------------------------------------------------
+  if (body.method === "callTool") {
+    const toolName = body.params.name;
+    const toolArgs = body.params.arguments;
 
-  console.log("👉 Calling tool:", toolName, "ARGS:", toolArgs);
+    console.log("👉 Calling tool:", toolName, "ARGS:", toolArgs);
 
-  try {
-    // FIX: Your tools live in _registeredTools
-    const tool = server._registeredTools.get(toolName);
+    try {
+      // FIX: use the server's internal registry (populated by server.tool)
+      const tool = server._registeredTools[toolName];
 
-    if (!tool) {
-      throw new Error(`Tool '${toolName}' not found`);
+      if (!tool) {
+        throw new Error(`Tool '${toolName}' not found`);
+      }
+
+      // Execute impl
+      const result = await tool.impl(toolArgs);
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+
+      res.write(`event: message\n`);
+      res.write(
+        `data: ${JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          result,
+        })}\n\n`
+      );
+
+      return res.end();
+    } catch (err) {
+      console.error("❌ Tool failed:", err);
+
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+
+      res.write(`event: message\n`);
+      res.write(
+        `data: ${JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          error: { code: -32000, message: err.message },
+        })}\n\n`
+      );
+
+      return res.end();
     }
-
-    // FIX: invoke tool handler
-    const result = await tool.impl(toolArgs);
-
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-
-    res.write(`event: message\n`);
-    res.write(
-      `data: ${JSON.stringify({
-        jsonrpc: "2.0",
-        id: body.id,
-        result,
-      })}\n\n`
-    );
-
-    return res.end();
-  } catch (err) {
-    console.error("❌ Tool failed:", err);
-
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-    });
-
-    res.write(`event: message\n`);
-    res.write(
-      `data: ${JSON.stringify({
-        jsonrpc: "2.0",
-        id: body.id,
-        error: { code: -32000, message: err.message || "Tool failed" },
-      })}\n\n`
-    );
-
-    return res.end();
   }
-}
 
-
+  // ------------------------------------------------------------------
   // Unsupported method
+  // ------------------------------------------------------------------
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
   });
@@ -162,7 +167,7 @@ if (body.method === "callTool") {
   res.end();
 });
 
-// Simple GET for testing
+// GET /mcp simple check
 app.get("/mcp", (req, res) => {
   res.json({ status: "MCP server running" });
 });
