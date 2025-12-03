@@ -56,7 +56,9 @@ server.registerTool(
         complete: (err, stmt, rows) => {
           if (err) {
             console.error("❌ Query failed:", err);
+            console.error("❌ Snowflake query error:", err);
             reject({ error: err.message });
+
           } else {
             console.log("✔ Query succeeded");
             resolve({ rows });
