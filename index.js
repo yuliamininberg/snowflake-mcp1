@@ -94,7 +94,12 @@ app.post("/mcp", async (req, res) => {
     console.log("👉 Calling tool:", toolName, "ARGS:", toolArgs);
 
     try {
-      const result = await server.callTool(toolName, toolArgs);
+      const tool = server.tools.get(toolName);
+      if (!tool) {
+        throw new Error(`Tool '${toolName}' not found`);
+      }
+      const result = await tool.invoke(toolArgs);
+
 
       // SSE response format
       res.writeHead(200, {
