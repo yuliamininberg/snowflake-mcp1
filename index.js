@@ -76,6 +76,35 @@ server.tool(
 console.log("✔ MCP tool registered: run_query");
 console.log("DEBUG registered tools:", server._registeredTools);
 
+
+// --- NEW: list_tables tool for fallback ---
+server.registerTool(
+  "list_tables",
+  {},
+  async () => {
+    const sql = `
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = '${process.env.SNOWFLAKE_SCHEMA}'
+      ORDER BY table_name
+    `;
+
+    return new Promise((resolve, reject) => {
+      connection.execute({
+        sqlText: sql,
+        complete: (err, stmt, rows) => {
+          if (err) {
+            console.error("❌ list_tables error:", err);
+            return reject({ error: err.message });
+          }
+          resolve({ rows });
+        }
+      });
+    });
+  }
+);
+
+
 // ------------------------------------------------------------
 // 3. EXPRESS JSON-RPC HANDLER
 // ------------------------------------------------------------
